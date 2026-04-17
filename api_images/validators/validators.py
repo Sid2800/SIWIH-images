@@ -4,7 +4,6 @@ from PIL import Image
 
 def validar_imagen(archivo):
 
-
     if archivo.size > MAX_TAMANO_IMAGEN_MB * 1024 * 1024:
         raise ValidationError(
             f"La imagen supera los {MAX_TAMANO_IMAGEN_MB}MB permitidos"

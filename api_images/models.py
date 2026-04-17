@@ -16,6 +16,10 @@ def ruta_miniatura(instance, filename):
     fecha = datetime.now().strftime('%Y/%m')
     return f"{instance.app}/{fecha}/thumb_{instance.uuid}.webp"
 
+def ruta_imagen_usuario(instance, filename):
+    return f"USUARIOS/{instance.uuid}.webp"
+
+
 class TipoPaciente(models.IntegerChoices):
     INTERNO = 1, "INTERNO"
     EXTERNO = 2, "EXTERNO"
@@ -82,3 +86,13 @@ class ImagenAlmacen(models.Model):
 
     def __str__(self):
         return str(self.uuid)
+    
+
+class ImagenUsuario(models.Model):
+    uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user_id = models.IntegerField(unique=True, db_index=True)
+    imagen = models.ImageField(upload_to=ruta_imagen_usuario)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Imagen usuario {self.user_id}"

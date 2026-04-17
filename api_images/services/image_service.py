@@ -1,6 +1,6 @@
 from django.db import transaction
 from django.utils import timezone
-from api_images.models import ImagenAlmacen
+from api_images.models import ImagenAlmacen, ImagenUsuario
 from api_images.utils.main import convertir_a_webp,generar_miniatura
 from rest_framework.exceptions import ValidationError
 
@@ -15,7 +15,8 @@ class ImagenService:
             ultima = self._obtener_ultima_version()
             nueva_version = ultima.version + 1 if ultima else 1
             self._desactivar_activas()
-            self.archivo_webp = self._convertir_webp()
+            self.archivo_webp = self._validar_webp()
+            #self.archivo_webp = self.data["archivo"] se qeuiteo porque la compresi0n se aplica en SIWIH
             nueva = self._crear_nueva_version(nueva_version)
             self._crear_miniatura(nueva)
         return nueva    
@@ -82,7 +83,13 @@ class ImagenService:
             activo=True
         )
     
-    
+    def _validar_webp(self):
+        archivo = self.data["archivo"]
+
+        if not archivo.name.lower().endswith(".webp"):
+            raise ValidationError("Se esperaba imagen WebP")
+
+        return archivo
 
     def _convertir_webp(self):
         archivo = self.data["archivo"]
@@ -99,3 +106,44 @@ class ImagenService:
             miniatura,
             save=True
         )
+
+
+class ImagenUsuarioService:
+
+    def __init__(self, info: dict):
+        self.user_id = info["usuario_id"]
+        self.archivo = info["archivo"]
+
+    def guardar(self):
+        with transaction.atomic():
+
+            archivo_webp = self._validar_webp()
+
+            obj = (
+                ImagenUsuario.objects
+                .select_for_update()
+                .filter(user_id=self.user_id)
+                .first()
+            )
+
+            if not obj:
+                obj = ImagenUsuario(user_id=self.user_id)
+
+            old = obj.imagen if obj.imagen else None
+
+            obj.imagen = archivo_webp
+            obj.save()
+
+            if old:
+                old.delete(save=False)
+
+            return obj
+
+    def _validar_webp(self):
+        archivo = self.archivo
+
+        if not archivo.name.lower().endswith(".webp"):
+            raise ValidationError("Se esperaba imagen WebP")
+
+        return archivo
+

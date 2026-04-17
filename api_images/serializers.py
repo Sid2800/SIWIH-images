@@ -11,6 +11,18 @@ class ImagenAlmacenSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class SubirImagenUsuarioSerializer(serializers.Serializer):
+    usuario_id = serializers.IntegerField(min_value=1)
+    archivo = serializers.ImageField(validators=[validar_imagen])
+
+
+class BuscarImagenesUsuarioSerializer(serializers.Serializer):
+    usuarios_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False
+    )
+
+
 class SubirImagenSerializer(serializers.Serializer):
     app = serializers.CharField(validators=[validar_app])
     origen_tipo = serializers.CharField(validators=[validar_origen_tipo])

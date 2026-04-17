@@ -4,14 +4,16 @@ from rest_framework.exceptions import ValidationError
 from django.db import IntegrityError
 import uuid
 import os
-from api_images.models import ImagenAlmacen
+from api_images.models import ImagenAlmacen, ImagenUsuario
 from api_images.utils.main import eliminar_archivos_imagen, regenerar_miniatura
 from api_images.utils.logger import log_info, log_error, log_warning
-from api_images.services.image_service import ImagenService
+from api_images.services.image_service import ImagenService, ImagenUsuarioService
 from api_images.serializers import (
     ImagenAlmacenSerializer,
     BuscarImagenesSerializer,
     SubirImagenSerializer,
+    SubirImagenUsuarioSerializer,
+    BuscarImagenesUsuarioSerializer,
     IdentificarImagenSerializer,
     DesactivarImagenSerializer,
     DesactivarImagenesBatchSerializer,
@@ -93,6 +95,99 @@ def subir_imagen(request):
             status=500
         )
     
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def subir_imagen_usuario(request):
+    start = time.time()
+    
+    try:
+        serializer = SubirImagenUsuarioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = ImagenUsuarioService(serializer.validated_data)
+        imagen = service.guardar()
+        imagen.refresh_from_db()
+
+        elapsed = time.time() - start
+        log_info(
+            f"Imagen subida correctamente "
+            f"usuario_id={imagen.user_id} "
+            f"tiempo={elapsed:.2f}s"
+        )
+
+        return Response({
+            "uuid": imagen.uuid,
+            "url": f"{settings.MEDIA_URL}{imagen.imagen}",
+        }, status=201)
+
+    except ValidationError as e:
+        log_error(
+            f"Validación fallida en subir_imagen "
+            f"error={e.detail}"
+        )
+
+        return Response(
+            {"error": e.detail},
+            status=400
+        )
+
+    except IntegrityError:
+        log_error(f"Intento duplicado de imagen activa ")
+
+        return Response(
+            {"error": "Ya existe una imagen activa para este origen."},
+            status=400
+        )
+
+    except Exception as e:
+        log_error(f"Error interno en subir_imagen")
+
+        return Response(
+            {"error": "Error interno procesando la imagen."},
+
+            status=500
+        )
+    
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def buscar_imagenes_usuario(request):
+
+    try:
+        serializer = BuscarImagenesUsuarioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        usuarios_ids = serializer.validated_data["usuarios_ids"]
+
+        imagenes = ImagenUsuario.objects.filter(
+            user_id__in=usuarios_ids
+        ).values(
+            "user_id",
+            "uuid",
+            "imagen"
+        )
+
+        resultados = [
+            {
+                "usuario_id": img["user_id"],
+                "uuid": img["uuid"],
+                "url": f"{settings.MEDIA_URL}{img['imagen']}" if img["imagen"] else None,
+            }
+            for img in imagenes
+        ]
+
+        return Response(resultados, status=200)
+
+    except Exception as e:
+
+        log_error(f"Error interno en buscar_imagenes_usuario {e}")
+
+        return Response(
+            {"error": "Error interno al consultar imagenes de usuario"},
+            status=500
+        )
+
 
 
 @api_view(['POST'])
