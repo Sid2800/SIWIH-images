@@ -88,6 +88,8 @@ class ImagenAlmacen(models.Model):
         return str(self.uuid)
     
 
+
+
 class ImagenUsuario(models.Model):
     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_id = models.IntegerField(unique=True, db_index=True)
@@ -96,3 +98,65 @@ class ImagenUsuario(models.Model):
 
     def __str__(self):
         return f"Imagen usuario {self.user_id}"
+
+
+
+class TipoImagenDispositivo(models.TextChoices):
+    GENERAL = "GENERAL", "General"
+    INVENTARIO = "INVENTARIO", "Inventario"
+    PLACA_SERIE = "PLACA_SERIE", "Placa o serie"
+    ESTADO_FISICO = "ESTADO_FISICO", "Estado fisico"
+    ACCESORIOS = "ACCESORIOS", "Accesorios"
+    OTRA = "OTRA", "Otra"
+
+
+def ruta_imagen_dispositivo(instance, filename):
+    fecha = timezone.now().strftime("%Y/%m")
+    return f"EQUIPOS/{fecha}/{instance.uuid}.webp"
+
+
+def ruta_miniatura_dispositivo(instance, filename):
+    fecha = timezone.now().strftime("%Y/%m")
+    return f"EQUIPOS/{fecha}/thumb_{instance.uuid}.webp"
+
+
+class ImagenDispositivo(models.Model):
+    uuid = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    dispositivo_id = models.PositiveIntegerField()
+    archivo = models.ImageField(upload_to=ruta_imagen_dispositivo)
+    miniatura = models.ImageField(
+        upload_to=ruta_miniatura_dispositivo,
+        null=True,
+        blank=True,
+    )
+    tipo_imagen = models.CharField(
+        max_length=50,
+        choices=TipoImagenDispositivo.choices,
+    )
+    tamano = models.PositiveIntegerField()
+    formato = models.CharField(max_length=10)
+    fecha_creado = models.DateTimeField(auto_now_add=True)
+    usuario_creador = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(dispositivo_id__gt=0),
+                name="ck_imagen_dispositivo_id_positivo",
+            ),
+            models.CheckConstraint(
+                condition=Q(tipo_imagen__in=TipoImagenDispositivo.values),
+                name="ck_imagen_dispositivo_tipo",
+            ),
+            models.UniqueConstraint(
+                fields=["dispositivo_id", "tipo_imagen"],
+                name="uq_imagen_dispositivo_tipo",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Equipo {self.dispositivo_id} - {self.tipo_imagen}"
