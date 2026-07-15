@@ -4,12 +4,20 @@ from rest_framework.exceptions import ValidationError
 from django.db import IntegrityError
 import uuid
 import os
-from api_images.models import ImagenAlmacen, ImagenUsuario
+from api_images.models import (
+    ImagenAlmacen,
+    ImagenDispositivo,
+    ImagenUsuario,
+)
 from api_images.utils.main import eliminar_archivos_imagen, regenerar_miniatura
 from api_images.utils.logger import log_info, log_error, log_warning
 from api_images.services.image_service import ImagenService, ImagenUsuarioService
+from api_images.services.device_image_service import (
+    ImagenDispositivoService,
+)
 from api_images.serializers import (
     ImagenAlmacenSerializer,
+    SubirImagenDispositivoSerializer,
     BuscarImagenesSerializer,
     SubirImagenSerializer,
     SubirImagenUsuarioSerializer,
@@ -609,3 +617,98 @@ def verificar_integridad(request):
         "archivos_sin_registro": archivos_sin_registro,
         "cantidad_archivos_sin_registro": len(archivos_sin_registro),
     }, status=200)
+
+
+def _construir_respuesta_imagen_dispositivo(imagen):
+    return {
+        "uuid": str(imagen.uuid),
+        "dispositivo_id": imagen.dispositivo_id,
+        "url": f"{settings.MEDIA_URL}{imagen.archivo.name}",
+        "miniatura": (
+            f"{settings.MEDIA_URL}{imagen.miniatura.name}"
+            if imagen.miniatura
+            else None
+        ),
+        "tipo_imagen": imagen.tipo_imagen,
+        "tamano": imagen.tamano,
+        "formato": imagen.formato,
+        "fecha_creado": imagen.fecha_creado,
+    }
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def subir_imagen_dispositivo(request):
+    try:
+        serializer = SubirImagenDispositivoSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(raise_exception=True)
+
+        imagen = ImagenDispositivoService(
+            serializer.validated_data,
+        ).guardar()
+
+        return Response(
+            {
+                "imagen": _construir_respuesta_imagen_dispositivo(
+                    imagen,
+                )
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    except ValidationError as exc:
+        log_warning(
+            "Validacion fallida al subir imagen de equipo "
+            f"error={exc.detail}"
+        )
+        return Response(
+            {"error": exc.detail},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    except Exception:
+        log_error("Error interno al subir imagen de equipo")
+        return Response(
+            {"error": "Error interno procesando la imagen del equipo."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def buscar_imagenes_dispositivo(request, dispositivo_id):
+    if dispositivo_id < 1:
+        return Response(
+            {"error": "El dispositivo_id debe ser mayor que cero."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        imagenes = (
+            ImagenDispositivo.objects
+            .filter(dispositivo_id=dispositivo_id)
+            .order_by("fecha_creado")
+        )
+
+        resultados = [
+            _construir_respuesta_imagen_dispositivo(imagen)
+            for imagen in imagenes
+        ]
+
+        return Response(
+            {
+                "dispositivo_id": dispositivo_id,
+                "cantidad": len(resultados),
+                "imagenes": resultados,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception:
+        log_error("Error interno consultando imagenes de equipo")
+        return Response(
+            {"error": "Error interno consultando imagenes del equipo."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

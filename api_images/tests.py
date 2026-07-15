@@ -4,6 +4,8 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
@@ -13,6 +15,8 @@ from PIL import Image
 
 from rest_framework.exceptions import ValidationError
 
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from api_images.models import (
     ImagenDispositivo,
@@ -445,3 +449,154 @@ class ImagenDispositivoServiceTests(TestCase):
             [],
         )
 9999
+
+
+class ImagenDispositivoApiTests(TestCase):
+    def setUp(self):
+        super().setUp()
+
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(
+            MEDIA_ROOT=self.media_directory.name,
+        )
+        self.media_override.enable()
+
+        self.usuario = get_user_model().objects.create_user(
+            username="tecnico_api",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.usuario)
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+
+        super().tearDown()
+
+    def crear_archivo_webp(self):
+        contenido = BytesIO()
+        Image.new("RGB", (20, 20), "white").save(
+            contenido,
+            format="WEBP",
+        )
+        contenido.seek(0)
+
+        return SimpleUploadedFile(
+            "equipo.webp",
+            contenido.getvalue(),
+            content_type="image/webp",
+        )
+
+    def crear_datos(
+        self,
+        dispositivo_id=20,
+        tipo_imagen=TipoImagenDispositivo.GENERAL,
+    ):
+        return {
+            "dispositivo_id": dispositivo_id,
+            "tipo_imagen": tipo_imagen,
+            "archivo": self.crear_archivo_webp(),
+            "usuario_snapshot": (
+                '{"id": 1, "nombre": "Tecnico API"}'
+            ),
+        }
+
+    def test_subir_imagen_dispositivo(self):
+        response = self.client.post(
+            reverse("subir_imagen_dispositivo"),
+            data=self.crear_datos(),
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+            response.data,
+        )
+        self.assertEqual(ImagenDispositivo.objects.count(), 1)
+        self.assertIn(
+            "EQUIPOS/",
+            response.data["imagen"]["url"],
+        )
+        self.assertIn(
+            "EQUIPOS/",
+            response.data["imagen"]["miniatura"],
+        )
+
+    def test_consultar_imagenes_dispositivo(self):
+        subida = self.client.post(
+            reverse("subir_imagen_dispositivo"),
+            data=self.crear_datos(dispositivo_id=21),
+            format="multipart",
+        )
+        self.assertEqual(
+            subida.status_code,
+            status.HTTP_201_CREATED,
+            subida.data,
+        )
+
+        response = self.client.get(
+            reverse(
+                "buscar_imagenes_dispositivo",
+                kwargs={"dispositivo_id": 21},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["cantidad"], 1)
+        self.assertEqual(
+            response.data["imagenes"][0]["tipo_imagen"],
+            TipoImagenDispositivo.GENERAL,
+        )
+
+    def test_consulta_sin_imagenes_devuelve_lista_vacia(self):
+        response = self.client.get(
+            reverse(
+                "buscar_imagenes_dispositivo",
+                kwargs={"dispositivo_id": 999},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["cantidad"], 0)
+        self.assertEqual(response.data["imagenes"], [])
+
+    def test_rechaza_primera_imagen_distinta_de_general(self):
+        response = self.client.post(
+            reverse("subir_imagen_dispositivo"),
+            data=self.crear_datos(
+                tipo_imagen=TipoImagenDispositivo.INVENTARIO,
+            ),
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(ImagenDispositivo.objects.count(), 0)
+        self.assertIn("tipo_imagen", response.data["error"])
+
+    def test_endpoints_requieren_autenticacion(self):
+        cliente_sin_autenticacion = APIClient()
+
+        subida = cliente_sin_autenticacion.post(
+            reverse("subir_imagen_dispositivo"),
+            data=self.crear_datos(),
+            format="multipart",
+        )
+        consulta = cliente_sin_autenticacion.get(
+            reverse(
+                "buscar_imagenes_dispositivo",
+                kwargs={"dispositivo_id": 20},
+            )
+        )
+
+        self.assertEqual(
+            subida.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertEqual(
+            consulta.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )

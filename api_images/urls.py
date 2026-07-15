@@ -11,7 +11,9 @@ from api_images.views import (
     verificar_integridad,
     desactivar_imagen,
     desactivar_imagenes_batch,
-    migrar_imagenes_externo_a_interno
+    migrar_imagenes_externo_a_interno,
+    subir_imagen_dispositivo,
+    buscar_imagenes_dispositivo,
 
 )
 
@@ -33,4 +35,16 @@ urlpatterns = [
     path("modificar/", modificar_imagen, name="modificar_imagen"),
     path("estadisticas/", estadisticas_almacenamiento, name="estadisticas_almacenamiento"),
     path("verificar_integridad/", verificar_integridad, name="verificar_integridad"),
+
+
+    path(
+        "equipos/subir/",
+        subir_imagen_dispositivo,
+        name="subir_imagen_dispositivo",
+    ),
+    path(
+        "equipos/<int:dispositivo_id>/imagenes/",
+        buscar_imagenes_dispositivo,
+        name="buscar_imagenes_dispositivo",
+    ),
 ]
