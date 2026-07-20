@@ -26,3 +26,6 @@ Thumbs.db
 
 # temporales
 temp_*.png
+
+# Archivos físicos almacenados por SIWIH Images
+/media/
