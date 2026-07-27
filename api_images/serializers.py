@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import (
+    FichaBajaDispositivo,
     ImagenAlmacen,
     ImagenDispositivo,
     TipoImagenDispositivo,
@@ -211,3 +212,37 @@ class SubirImagenDispositivoSerializer(serializers.Serializer):
 
         data["usuario_snapshot"] = usuario_snapshot
         return data
+
+
+class SubirFichaBajaDispositivoSerializer(serializers.Serializer):
+    """Valida la unica constancia firmada permitida para cada equipo."""
+
+    dispositivo_id = serializers.IntegerField(min_value=1)
+    archivo = serializers.ImageField(validators=[validar_imagen])
+    usuario_snapshot = serializers.CharField(
+        required=False,
+        allow_blank=True,
+    )
+
+    def validate_dispositivo_id(self, dispositivo_id):
+        if FichaBajaDispositivo.objects.filter(
+            dispositivo_id=dispositivo_id,
+        ).exists():
+            raise ValidationError(
+                "El equipo ya tiene una ficha de baja firmada."
+            )
+        return dispositivo_id
+
+    def validate_usuario_snapshot(self, usuario_snapshot):
+        if not usuario_snapshot:
+            return None
+
+        try:
+            usuario_snapshot = json.loads(usuario_snapshot)
+        except json.JSONDecodeError:
+            raise ValidationError("Debe ser JSON valido.")
+
+        if not isinstance(usuario_snapshot, dict):
+            raise ValidationError("Debe ser un objeto JSON.")
+
+        return usuario_snapshot

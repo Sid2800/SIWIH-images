@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from api_images.models import (
+    FichaBajaDispositivo,
     ImagenDispositivo,
     TipoImagenDispositivo,
     ruta_imagen_dispositivo,
@@ -600,3 +601,129 @@ class ImagenDispositivoApiTests(TestCase):
             consulta.status_code,
             status.HTTP_401_UNAUTHORIZED,
         )
+
+
+class FichaBajaDispositivoApiTests(TestCase):
+    """Cubre la constancia legal sin afectar las seis fotos del inventario."""
+
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(
+            MEDIA_ROOT=self.media_directory.name,
+        )
+        self.media_override.enable()
+
+        self.usuario = get_user_model().objects.create_user(
+            username="tecnico_baja_api",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.usuario)
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+        super().tearDown()
+
+    @staticmethod
+    def crear_archivo_webp():
+        contenido = BytesIO()
+        Image.new("RGB", (30, 40), "white").save(
+            contenido,
+            format="WEBP",
+        )
+        return SimpleUploadedFile(
+            "ficha_baja.webp",
+            contenido.getvalue(),
+            content_type="image/webp",
+        )
+
+    def test_subir_y_consultar_ficha_firmada(self):
+        subida = self.client.post(
+            reverse("subir_ficha_baja_dispositivo"),
+            data={
+                "dispositivo_id": 45,
+                "archivo": self.crear_archivo_webp(),
+                "usuario_snapshot": (
+                    '{"id": 1, "nombre": "Tecnico Baja"}'
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            subida.status_code,
+            status.HTTP_201_CREATED,
+            subida.data,
+        )
+        self.assertEqual(FichaBajaDispositivo.objects.count(), 1)
+        self.assertIn(
+            "EQUIPOS/BAJAS/",
+            subida.data["ficha"]["url"],
+        )
+
+        consulta = self.client.get(
+            reverse(
+                "buscar_ficha_baja_dispositivo",
+                kwargs={"dispositivo_id": 45},
+            )
+        )
+        self.assertEqual(consulta.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            consulta.data["ficha"]["uuid"],
+            subida.data["ficha"]["uuid"],
+        )
+
+    def test_rechaza_segunda_ficha_para_el_mismo_equipo(self):
+        datos = {
+            "dispositivo_id": 46,
+            "archivo": self.crear_archivo_webp(),
+        }
+        primera = self.client.post(
+            reverse("subir_ficha_baja_dispositivo"),
+            data=datos,
+            format="multipart",
+        )
+        segunda = self.client.post(
+            reverse("subir_ficha_baja_dispositivo"),
+            data={
+                "dispositivo_id": 46,
+                "archivo": self.crear_archivo_webp(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(primera.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(segunda.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(FichaBajaDispositivo.objects.count(), 1)
+
+    def test_consulta_sin_ficha_devuelve_null(self):
+        respuesta = self.client.get(
+            reverse(
+                "buscar_ficha_baja_dispositivo",
+                kwargs={"dispositivo_id": 999},
+            )
+        )
+
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK)
+        self.assertIsNone(respuesta.data["ficha"])
+
+    def test_endpoints_de_ficha_requieren_autenticacion(self):
+        cliente = APIClient()
+
+        subida = cliente.post(
+            reverse("subir_ficha_baja_dispositivo"),
+            data={
+                "dispositivo_id": 47,
+                "archivo": self.crear_archivo_webp(),
+            },
+            format="multipart",
+        )
+        consulta = cliente.get(
+            reverse(
+                "buscar_ficha_baja_dispositivo",
+                kwargs={"dispositivo_id": 47},
+            )
+        )
+
+        self.assertEqual(subida.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(consulta.status_code, status.HTTP_401_UNAUTHORIZED)

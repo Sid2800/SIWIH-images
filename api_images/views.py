@@ -5,6 +5,7 @@ from django.db import IntegrityError
 import uuid
 import os
 from api_images.models import (
+    FichaBajaDispositivo,
     ImagenAlmacen,
     ImagenDispositivo,
     ImagenUsuario,
@@ -15,9 +16,13 @@ from api_images.services.image_service import ImagenService, ImagenUsuarioServic
 from api_images.services.device_image_service import (
     ImagenDispositivoService,
 )
+from api_images.services.device_discharge_image_service import (
+    FichaBajaDispositivoService,
+)
 from api_images.serializers import (
     ImagenAlmacenSerializer,
     SubirImagenDispositivoSerializer,
+    SubirFichaBajaDispositivoSerializer,
     BuscarImagenesSerializer,
     SubirImagenSerializer,
     SubirImagenUsuarioSerializer,
@@ -710,5 +715,92 @@ def buscar_imagenes_dispositivo(request, dispositivo_id):
         log_error("Error interno consultando imagenes de equipo")
         return Response(
             {"error": "Error interno consultando imagenes del equipo."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+def _construir_respuesta_ficha_baja_dispositivo(ficha):
+    return {
+        "uuid": str(ficha.uuid),
+        "dispositivo_id": ficha.dispositivo_id,
+        "url": f"{settings.MEDIA_URL}{ficha.archivo.name}",
+        "miniatura": (
+            f"{settings.MEDIA_URL}{ficha.miniatura.name}"
+            if ficha.miniatura
+            else None
+        ),
+        "tamano": ficha.tamano,
+        "formato": ficha.formato,
+        "fecha_creado": ficha.fecha_creado,
+    }
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def subir_ficha_baja_dispositivo(request):
+    """Recibe la fotografia firmada que autoriza la baja definitiva."""
+    try:
+        serializer = SubirFichaBajaDispositivoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        ficha = FichaBajaDispositivoService(
+            serializer.validated_data,
+        ).guardar()
+
+        return Response(
+            {
+                "ficha": _construir_respuesta_ficha_baja_dispositivo(
+                    ficha,
+                )
+            },
+            status=status.HTTP_201_CREATED,
+        )
+    except ValidationError as exc:
+        log_warning(
+            "Validacion fallida al subir ficha de baja de equipo "
+            f"error={exc.detail}"
+        )
+        return Response(
+            {"error": exc.detail},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception:
+        log_error("Error interno al subir ficha de baja de equipo")
+        return Response(
+            {"error": "Error interno procesando la ficha de baja."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def buscar_ficha_baja_dispositivo(request, dispositivo_id):
+    """Devuelve la constancia firmada o null cuando el equipo no tiene una."""
+    if dispositivo_id < 1:
+        return Response(
+            {"error": "El dispositivo_id debe ser mayor que cero."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        ficha = FichaBajaDispositivo.objects.filter(
+            dispositivo_id=dispositivo_id,
+        ).first()
+
+        return Response(
+            {
+                "dispositivo_id": dispositivo_id,
+                "ficha": (
+                    _construir_respuesta_ficha_baja_dispositivo(ficha)
+                    if ficha
+                    else None
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+    except Exception:
+        log_error("Error interno consultando ficha de baja de equipo")
+        return Response(
+            {"error": "Error interno consultando la ficha de baja."},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

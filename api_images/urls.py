@@ -14,6 +14,8 @@ from api_images.views import (
     migrar_imagenes_externo_a_interno,
     subir_imagen_dispositivo,
     buscar_imagenes_dispositivo,
+    subir_ficha_baja_dispositivo,
+    buscar_ficha_baja_dispositivo,
 
 )
 
@@ -46,5 +48,15 @@ urlpatterns = [
         "equipos/<int:dispositivo_id>/imagenes/",
         buscar_imagenes_dispositivo,
         name="buscar_imagenes_dispositivo",
+    ),
+    path(
+        "equipos/bajas/subir/",
+        subir_ficha_baja_dispositivo,
+        name="subir_ficha_baja_dispositivo",
+    ),
+    path(
+        "equipos/<int:dispositivo_id>/baja/ficha/",
+        buscar_ficha_baja_dispositivo,
+        name="buscar_ficha_baja_dispositivo",
     ),
 ]

@@ -160,3 +160,48 @@ class ImagenDispositivo(models.Model):
 
     def __str__(self):
         return f"Equipo {self.dispositivo_id} - {self.tipo_imagen}"
+
+
+def ruta_ficha_baja_dispositivo(instance, filename):
+    """Separa las constancias legales de las seis fotografias del equipo."""
+    fecha = timezone.now().strftime("%Y/%m")
+    return f"EQUIPOS/BAJAS/{fecha}/{instance.uuid}.webp"
+
+
+def ruta_miniatura_ficha_baja_dispositivo(instance, filename):
+    fecha = timezone.now().strftime("%Y/%m")
+    return f"EQUIPOS/BAJAS/{fecha}/thumb_{instance.uuid}.webp"
+
+
+class FichaBajaDispositivo(models.Model):
+    """Fotografia inmutable de la ficha firmada que autoriza una baja."""
+
+    uuid = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    # No es ForeignKey: el equipo vive en la base principal de SIWIH y este
+    # servidor conserva únicamente el identificador compartido por la API.
+    dispositivo_id = models.PositiveIntegerField(unique=True)
+    archivo = models.ImageField(upload_to=ruta_ficha_baja_dispositivo)
+    miniatura = models.ImageField(
+        upload_to=ruta_miniatura_ficha_baja_dispositivo,
+        null=True,
+        blank=True,
+    )
+    tamano = models.PositiveIntegerField()
+    formato = models.CharField(max_length=10)
+    fecha_creado = models.DateTimeField(auto_now_add=True)
+    usuario_creador = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(dispositivo_id__gt=0),
+                name="ck_ficha_baja_dispositivo_id_positivo",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Ficha de baja del equipo {self.dispositivo_id}"
