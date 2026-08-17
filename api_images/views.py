@@ -4,6 +4,7 @@ from rest_framework.exceptions import ValidationError
 from django.db import IntegrityError
 import uuid
 import os
+from pathlib import Path
 from api_images.models import (
     FichaBajaDispositivo,
     ImagenAlmacen,
@@ -36,15 +37,40 @@ from api_images.models import TipoPaciente
 from api_images.constants import ESPACIO_TOTAL_ASIGNADO_BYTES
 from django.conf import settings
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Sum, Count
 import time
 
 
 # Create your views here.
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def estado_servicio(request):
+    """Comprueba base de datos y almacenamiento sin exponer datos internos."""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+
+        media_root = Path(settings.MEDIA_ROOT)
+        if not media_root.is_dir() or not os.access(media_root, os.W_OK):
+            raise OSError("MEDIA_ROOT no existe o no permite escritura")
+    except Exception:
+        log_error("Comprobacion de salud de SIWIH Images fallida")
+        return Response(
+            {"estado": "no_disponible"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return Response(
+        {"estado": "ok"},
+        status=status.HTTP_200_OK,
+    )
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def saludo(request):

@@ -1,9 +1,14 @@
-from api_images.constants import MAX_TAMANO_IMAGEN_MB, TIPOS_PERMITIDOS, APP_VALIDAS, ORIGEN_VALIDOS
+from api_images.constants import (
+    APP_VALIDAS,
+    MAX_PIXELES_IMAGEN,
+    MAX_TAMANO_IMAGEN_MB,
+    ORIGEN_VALIDOS,
+    TIPOS_PERMITIDOS,
+)
 from django.core.exceptions import ValidationError
 from PIL import Image
 
 def validar_imagen(archivo):
-
     if archivo.size > MAX_TAMANO_IMAGEN_MB * 1024 * 1024:
         raise ValidationError(
             f"La imagen supera los {MAX_TAMANO_IMAGEN_MB}MB permitidos"
@@ -13,13 +18,27 @@ def validar_imagen(archivo):
         raise ValidationError("Formato de imagen no permitido")
 
     try:
-        img = Image.open(archivo)
-        img.verify()
-        archivo.seek(0) 
-        
-    except Exception:
-        raise ValidationError("El archivo está corrupto o no es una imagen válida")
+        with Image.open(archivo) as img:
+            formato_real = (img.format or "").upper()
+            cantidad_pixeles = img.width * img.height
+            if cantidad_pixeles > MAX_PIXELES_IMAGEN:
+                raise ValidationError(
+                    "La imagen supera la resolucion maxima permitida"
+                )
+            img.verify()
+    except ValidationError:
+        raise
+    except Exception as exc:
+        raise ValidationError(
+            "El archivo está corrupto o no es una imagen válida"
+        ) from exc
+    finally:
+        archivo.seek(0)
 
+    # El nombre y el Content-Type los controla el cliente. Pillow confirma el
+    # formato real para impedir guardar PNG/JPEG renombrados como .webp.
+    if formato_real != "WEBP":
+        raise ValidationError("El contenido de la imagen debe ser WebP")
 
 def validar_app(value):
     if value not in APP_VALIDAS:

@@ -13,15 +13,58 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
 
 
 load_dotenv()
 
+
+def env_bool(nombre, valor_predeterminado=False):
+    """Convierte una variable de entorno comun a un booleano estricto."""
+    valor = os.getenv(nombre)
+    if valor is None:
+        return valor_predeterminado
+
+    valor_normalizado = valor.strip().lower()
+    if valor_normalizado in {"1", "true", "yes", "on"}:
+        return True
+    if valor_normalizado in {"0", "false", "no", "off"}:
+        return False
+
+    raise ImproperlyConfigured(
+        f"{nombre} debe contener un valor booleano valido."
+    )
+
+
+def env_list(nombre, valor_predeterminado=""):
+    """Lee una lista separada por comas y descarta elementos vacios."""
+    valor = os.getenv(nombre, valor_predeterminado)
+    return [elemento.strip() for elemento in valor.split(",") if elemento.strip()]
+
+
+def env_required(nombre):
+    """Exige configuracion sensible fuera del entorno aislado de pruebas."""
+    valor = os.getenv(nombre)
+    if ENVIRONMENT != "test" and (valor is None or not valor.strip()):
+        raise ImproperlyConfigured(
+            f"La variable {nombre} es obligatoria."
+        )
+    return valor
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-#logger 
-LOG_DIR = BASE_DIR.parent / "logs"
-os.makedirs(LOG_DIR, exist_ok=True)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
+
+if ENVIRONMENT not in {"development", "production", "test"}:
+    raise ImproperlyConfigured(
+        "ENVIRONMENT debe ser development, production o test."
+    )
+
+IS_PRODUCTION = ENVIRONMENT == "production"
+
+# Los logs viven fuera del codigo y pueden apuntar a una ruta persistente.
+LOG_DIR = Path(os.getenv("LOG_DIR", BASE_DIR.parent / "logs"))
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # Quick-start development settings - unsuitable for production
@@ -29,11 +72,20 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ImproperlyConfigured("La variable SECRET_KEY es obligatoria.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True if os.getenv("DEBUG", "0") == "1" else False
+DEBUG = env_bool("DEBUG")
+if IS_PRODUCTION and DEBUG:
+    raise ImproperlyConfigured("DEBUG no puede estar activo en production.")
 
-ALLOWED_HOSTS = ['127.0.0.1', '192.168.88.28']
+ALLOWED_HOSTS = env_list(
+    "ALLOWED_HOSTS",
+    "127.0.0.1,localhost" if not IS_PRODUCTION else "",
+)
+if not ALLOWED_HOSTS:
+    raise ImproperlyConfigured("ALLOWED_HOSTS es obligatorio en production.")
 
 
 # Application definition
@@ -52,6 +104,9 @@ INSTALLED_APPS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
@@ -98,11 +153,18 @@ WSGI_APPLICATION = 'siwi_image.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.getenv('DB_DEFAULT_NAME'),
-        'USER': os.getenv('DB_DEFAULT_USER'),
-        'PASSWORD': os.getenv('DB_DEFAULT_PASSWORD'),
-        'HOST': os.getenv('DB_DEFAULT_HOST'),
-        'PORT': os.getenv('DB_DEFAULT_PORT'),
+        'NAME': env_required('DB_DEFAULT_NAME'),
+        'USER': env_required('DB_DEFAULT_USER'),
+        'PASSWORD': env_required('DB_DEFAULT_PASSWORD'),
+        'HOST': env_required('DB_DEFAULT_HOST'),
+        'PORT': os.getenv('DB_DEFAULT_PORT', '3306'),
+        # Gunicorn reutiliza conexiones, pero comprueba que sigan vivas antes
+        # de cada solicitud para recuperarse de reinicios breves de MySQL.
+        'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
+        'CONN_HEALTH_CHECKS': True,
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+        },
     }
 }
 
@@ -139,22 +201,23 @@ LOGGING = {
 
     "handlers": {
         "file": {
-            "class": "logging.FileHandler",
+            # logrotate puede rotar este archivo sin reiniciar Gunicorn.
+            "class": "logging.handlers.WatchedFileHandler",
             "filename": LOG_DIR / "siwi_images.log",
             "formatter": "standard",
-            "level": "INFO",
+            "level": os.getenv("LOG_LEVEL", "INFO").upper(),
         },
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "standard",
-            "level": "INFO",
+            "level": os.getenv("LOG_LEVEL", "INFO").upper(),
         },
     },
 
     "loggers": {
         "api_images": {
             "handlers": ["console", "file"],
-            "level": "INFO",
+            "level": os.getenv("LOG_LEVEL", "INFO").upper(),
             "propagate": False,
         },
     },
@@ -172,15 +235,38 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-
 STATIC_URL = "/static-images/"
 MEDIA_URL = "/media/"
 
 if ENVIRONMENT == "development":
-    STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
-    MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+    directorio_static = BASE_DIR / "static"
+    if directorio_static.exists():
+        STATICFILES_DIRS = [directorio_static]
+    MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", BASE_DIR / "media"))
+elif ENVIRONMENT == "test":
+    STATIC_ROOT = Path(os.getenv("STATIC_ROOT", BASE_DIR / "test-staticfiles"))
+    MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", BASE_DIR / "test-media"))
 else:
-    STATIC_ROOT = BASE_DIR.parent / "staticfiles"
-    MEDIA_ROOT = "/data/media/images"
+    STATIC_ROOT = Path(
+        os.getenv("STATIC_ROOT", BASE_DIR.parent / "staticfiles")
+    )
+    MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "/data/media/images"))
+
+
+# El servidor se consume internamente desde SIWIH principal. Si la red usa
+# HTTPS, estas opciones se activan con USE_HTTPS=1 en el EnvironmentFile.
+USE_HTTPS = env_bool("USE_HTTPS")
+SECURE_SSL_REDIRECT = IS_PRODUCTION and USE_HTTPS
+SESSION_COOKIE_SECURE = IS_PRODUCTION and USE_HTTPS
+CSRF_COOKIE_SECURE = IS_PRODUCTION and USE_HTTPS
+SECURE_HSTS_SECONDS = (
+    int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
+    if IS_PRODUCTION and USE_HTTPS
+    else 0
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION and USE_HTTPS
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+if IS_PRODUCTION and USE_HTTPS:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 

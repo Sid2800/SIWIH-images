@@ -1,5 +1,6 @@
 from django.urls import path
 from api_images.views import (
+    estado_servicio,
     saludo, 
     subir_imagen, 
     subir_imagen_usuario,
@@ -21,6 +22,7 @@ from api_images.views import (
 
 
 urlpatterns = [
+    path("health/", estado_servicio, name="estado_servicio"),
     path("saludo/", saludo, name="saludo"),
     path("subir_imagen/", subir_imagen, name="subir_imagen"),
     path("subir_imagen_usuario/", subir_imagen_usuario, name="subir_imagen_usuario"),
